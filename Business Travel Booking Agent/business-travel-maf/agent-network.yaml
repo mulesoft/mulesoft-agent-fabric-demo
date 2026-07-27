@@ -1,0 +1,207 @@
+schemaVersion: 1.0.0
+label: business-travel-agent-fabric
+
+brokers:
+    travel-orchestrator:
+        card:
+            protocolVersion: 0.3.0
+            name: Business Travel Orchestrator
+            description: Orchestrates complete business travel booking workflow including flight search, calendar conflict checking, booking confirmation, calendar blocking, and Concur expense submission.
+            url: ${ingressgw.url}/travel-orchestrator
+            capabilities:
+                pushNotifications: true
+            version: 1.0.0
+            securitySchemes: {}
+            defaultInputModes:
+                - application/json
+                - text/plain
+            defaultOutputModes:
+                - application/json
+                - text/plain
+            skills:
+                - id: business-travel-booking
+                  name: Business Travel Booking
+                  description: End-to-end business travel booking including flight and hotel search, calendar conflict check, booking confirmation, calendar blocking, and Concur expense submission
+                  examples:
+                    - Book a business trip from Atlanta to Paris from September 10-12, 2026
+                    - I need to travel to CDG next month for a client meeting
+                  inputModes:
+                    - application/json
+                    - text/plain
+                  outputModes:
+                    - application/json
+                    - text/plain
+                  tags: [travel, booking, business-travel, concur, calendar]
+        spec:
+            llm:
+                ref:
+                    name: AzureOpenAI
+                configuration:
+                    model: gpt-5
+            instructions:
+                - |
+                  You are the Business Travel Orchestrator. You coordinate the complete business travel booking workflow.
+                    On any failure: stop immediately and report — FAILED | Step N | agent/tool name | error message. Do not continue silently.
+
+                    ## Workflow Steps:
+                    1. Parse the user request into structured fields:
+                        - origin: departure airport IATA code (e.g. ATL)
+                        - destination: arrival airport IATA code (e.g. PAR)
+                        - travel_date: YYYY-MM-DD
+                        - check_out: YYYY-MM-DD
+                        - city_code: hotel city code (e.g. PAR)
+
+                    Call aws-bedrock-travel-search with only these structured fields. Do not send freeform text.
+                    IMPORTANT: Store the complete flights array and hotels array from the response — you will need these exact values in step 5.
+                    If aws-bedrock-travel-search returns an error or status 500, or fails twice: stop and report failure using the Error Reporting Rules above. Agent to check: aws-bedrock-travel-search (AWS Lambda).
+
+                    2. Use agentforce-calendar-agent to validate calendar availability.
+                        - Pass: travelerId (${salesforce.travelerId}), travelStartDate, travelEndDate
+                        - Expected response: CLEARED or CONFLICTS_FOUND
+                    If agentforce-calendar-agent returns an error or unexpected response: stop and report failure. Agent to check: agentforce-calendar-agent (Agentforce / Salesforce).
+
+                    3. If CLEARED: Use slack-messenger-mcp sendTravelRequest to notify channel ${slack.channelId} with flight and hotel options including prices, airline, hotel name, and policy status.
+                    If slack-messenger-mcp fails: stop and report failure. Agent to check: slack-messenger-mcp (MuleSoft MCP Server).
+                    If CONFLICTS_FOUND: notify user via Slack and ask for alternative dates — then stop.
+
+                    4. Wait for user confirmation.
+
+                    5. Upon approval, call concur-mcp book-flight tool with this EXACT JSON structure. Replace every placeholder with real values from the AWS search results. NEVER send empty values — if you do the booking will fail.
+                        {
+                          "flight_id": "<flight id from search results e.g. F9-ATL-ORD>",
+                          "flight_price": <flight price as a NUMBER e.g. 198>,
+                          "flight_airline": "<airline code from search results e.g. F9>",
+                          "flight_departure": "<departure datetime from search results e.g. 2026-07-08T06:35:00>",
+                          "flight_arrival": "<arrival datetime from search results e.g. 2026-07-08T07:53:00>",
+                          "hotel_name": "<hotel name from search results e.g. Marriott Midway>",
+                          "hotel_address": "<hotel address from search results e.g. 6520 S Cicero Ave, Chicago>",
+                          "hotel_price_per_night": <hotel price per night as a NUMBER e.g. 139>,
+                          "traveler_id": "${salesforce.travelerId}",
+                          "origin": "<origin airport code from step 1 e.g. ORD>",
+                          "destination": "<destination airport code from step 1 e.g. ATL>",
+                          "start_date": "<travel_date from step 1 e.g. 2026-07-08>",
+                          "end_date": "<check_out from step 1 e.g. 2026-07-12>"
+                        }
+                    If concur-mcp book-flight fails: stop and report failure. Agent to check: concur-mcp (MuleSoft MCP Server).
+
+                    6. After booking succeeds, call agentforce-calendar-agent to block the calendar dates.
+                        - Pass: travelerId (${salesforce.travelerId}), travelStartDate, travelEndDate, destination, flight details (airline, departure datetime, arrival datetime)
+                    If agentforce-calendar-agent fails: report failure but continue to step 7 — calendar block failure is non-fatal. Note the failure in the final Slack message. Agent to check: agentforce-calendar-agent (Agentforce / Salesforce).
+
+                    7. Call concur-mcp submit-expense with the same flat fields from step 5 plus booking_reference returned from step 5:
+                        {
+                          "flight_id": "<same as step 5>",
+                          "flight_price": <same as step 5>,
+                          "flight_airline": "<same as step 5>",
+                          "flight_departure": "<same as step 5>",
+                          "flight_arrival": "<same as step 5>",
+                          "hotel_name": "<same as step 5>",
+                          "hotel_address": "<same as step 5>",
+                          "hotel_price_per_night": <same as step 5>,
+                          "traveler_id": "${salesforce.travelerId}",
+                          "origin": "<same as step 5>",
+                          "destination": "<same as step 5>",
+                          "start_date": "<same as step 5>",
+                          "end_date": "<same as step 5>",
+                          "booking_reference": "<booking_reference from step 5 response>"
+                        }
+                    If concur-mcp submit-expense fails: report failure but continue to step 8. Note the failure in the final Slack message. Agent to check: concur-mcp (MuleSoft MCP Server).
+
+                    8. Call slack-messenger-mcp sendTravelRequest with slackChannel ${slack.channelId} and a summary of: booking confirmation, hotel reservation, calendar block status, and expense submission status.
+                    If slack-messenger-mcp fails: report failure. Agent to check: slack-messenger-mcp.
+
+            links:
+                - agent:
+                    ref:
+                        name: aws-bedrock-travel-search
+                - agent:
+                    ref:
+                        name: agentforce-calendar-agent
+
+            tools:
+                - mcp:
+                    ref:
+                        name: concur-mcp
+                - mcp:
+                    ref:
+                        name: slack-messenger-mcp
+
+agents:
+    aws-bedrock-travel-search:
+        label: Travel Search A2A Agent (AWS Lambda)
+        metadata:
+            protocol: a2a
+            platform: Lambda
+
+    agentforce-calendar-agent:
+        label: Agentforce Calendar Agent - Check and Block
+        metadata:
+            protocol: a2a
+            platform: Agentforce
+
+mcpServers:
+    concur-mcp:
+        label: Concur Booking & Expense MCP Server
+        metadata:
+            transport:
+                kind: streamableHttp
+                path: /mcp
+
+    slack-messenger-mcp:
+        label: Slack Messenger MCP Server
+        metadata:
+            transport:
+                kind: streamableHttp
+                path: /mcp
+
+llmProviders:
+    AzureOpenAI:
+        label: Azure OpenAI
+        description: Azure OpenAI GPT-5-mini
+        metadata:
+            platform: AzureOpenai
+
+connections:
+    # AWS Lambda A2A - Travel Search Agent
+    aws-bedrock-travel-search-connection:
+        kind: agent
+        ref:
+            name: aws-bedrock-travel-search
+        spec:
+            url: ${awsBedrock.travelSearchUrl}
+    # Agentforce - Calendar Check + Block (via Flex Gateway A2A policy)
+    agentforce-calendar-agent-connection:
+        kind: agent
+        ref:
+            name: agentforce-calendar-agent
+        spec:
+            url: ${salesforce.agentUrl}
+
+    # MuleSoft Concur - Book  & Expense Submission
+    concur-mcp-connection:
+        kind: mcp
+        ref:
+            name: concur-mcp
+        spec:
+            url: ${mulesoft.concurURL}
+
+
+    # Slack - Notifications + Approval
+    slack-messenger-mcp-connection:
+        kind: mcp
+        ref:
+            name: slack-messenger-mcp
+        spec:
+            url: ${slack.messengerUrl}
+
+    #  Azure OpenAI - gpt-5
+    my-AzureOpenAI-connection:
+        kind: llm
+        ref:
+            name: AzureOpenAI
+        spec:
+            url: ${AzureOpenAI.openaiurl}
+            configuration:
+                apiKey: ${AzureOpenAI.apiKey}
+                deploymentName: ${AzureOpenAI.deploymentName}
+                timeout: 120000

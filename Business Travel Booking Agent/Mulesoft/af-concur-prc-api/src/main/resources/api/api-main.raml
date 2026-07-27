@@ -1,0 +1,71 @@
+#%RAML 1.0
+title: Travel Booking Process API
+version: v1
+mediaType: application/json
+
+/process:
+  /book-flight:
+    post:
+      description: Books flight in Concur after user confirmation
+      body:
+        application/json:
+          example: |
+            {
+              "traveler_id": "005gL000008CXWg",
+              "origin": "ATL",
+              "destination": "JFK",
+              "departure_date": "2026-03-10",
+              "airline": "JetBlue",
+              "airline_code": "B6",
+              "flight_price": 118.41
+            }
+      responses:
+        200:
+          body:
+            application/json:
+              example: |
+                {
+                  "booking_status": "CONFIRMED",
+                  "booking_reference": "BK-2026-03-ATL-JFK-0892",
+                  "confirmation_number": "JB-441829",
+                  "ticket_number": "TK-882901",
+                  "seat": "14A",
+                  "class": "Economy"
+                }
+
+  /submit-expense:
+    post:
+      description: Submits expense report after flight and hotel are booked
+      body:
+        application/json:
+          example: |
+            {
+              "traveler_id": "005gL000008CXWg",
+              "booking_reference": "BK-2026-03-ATL-JFK-0892",
+              "FlightDetails": {
+                "origin": "ATL",
+                "destination": "JFK",
+                "departure_date": "2026-03-10",
+                "airline": "JetBlue",
+                "flight_price": 118.41
+              },
+              "HotelDetails": {
+                "Name": "Marriott",
+                "Location": "Midtown",
+                "Checkin_Date": "2026-03-10",
+                "Checkout_Date": "2026-03-12",
+                "hotel_price": 189.00
+              }
+            }
+      responses:
+        200:
+          body:
+            application/json:
+              example: |
+                {
+                  "expense_status": "SUBMITTED",
+                  "expense_report_id": "EXP-2026-0892",
+                  "total_amount": 496.41,
+                  "approval_status": "PENDING_MANAGER",
+                  "policy_compliant": true
+                }

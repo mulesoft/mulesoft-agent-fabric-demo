@@ -1,0 +1,138 @@
+#%RAML 1.0
+title: Concur Mock System API
+description: System API for mocking SAP Concur travel booking and expense reporting.
+version: v1
+mediaType: application/json
+
+types:
+  FlightRequest:
+    type: object
+    properties:
+      traveler_id:
+        type: string
+        required: true
+      origin:
+        type: string
+        required: true
+      destination:
+        type: string
+        required: true
+      departure_date:
+        type: string
+        required: true
+      airline:
+        type: string
+        required: true
+      flight_price:
+        type: number
+        required: true
+
+  ExpenseRequest:
+    type: object
+    properties:
+      FlightDetails:
+        type: object
+        required: true
+        properties:
+          traveler_id:
+            type: string
+            required: true
+          origin:
+            type: string
+            required: true
+          destination:
+            type: string
+            required: true
+          departure_date:
+            type: string
+            required: true
+          airline:
+            type: string
+            required: true
+          flight_price:
+            type: number
+            required: true
+      HotelDetails:
+        type: object
+        required: true
+        properties:
+          traveler_id:
+            type: string
+            required: true
+          Name:
+            type: string
+            required: true
+          Location:
+            type: string
+            required: true
+          Checkin_Date:
+            type: string
+            required: true
+          Checkout_Date:
+            type: string
+            required: true
+          hotel_price:
+            type: number
+            required: true
+
+/concur:
+  /flight:
+    post:
+      description: Mock Concur flight booking
+      body:
+        application/json:
+          type: FlightRequest
+      responses:
+        200:
+          body:
+            application/json:
+              example: |
+                {
+                  "status": "BOOKED",
+                  "booking_reference": "BK-2026-03-ATL-JFK-0892",
+                  "confirmation_number": "JB-441829",
+                  "ticket_number": "TK-882901",
+                  "airline": "JetBlue",
+                  "departure": "2026-03-10T08:00:00",
+                  "arrival": "2026-03-10T10:30:00",
+                  "seat": "14A",
+                  "class": "Economy",
+                  "amount_charged": 118.41
+                }
+        400:
+          body:
+            application/json:
+              example: |
+                {
+                  "error": "Bad Request",
+                  "message": "Missing required fields"
+                }
+
+  /expense:
+    post:
+      description: Mock Concur expense report submission
+      body:
+        application/json:
+          type: ExpenseRequest
+      responses:
+        200:
+          body:
+            application/json:
+              example: |
+                {
+                  "status": "SUBMITTED",
+                  "expense_report_id": "EXP-2026-0892",
+                  "report_name": "Business Trip - JFK - Mar 2026",
+                  "total_amount": 496.41,
+                  "currency": "USD",
+                  "approval_status": "PENDING_MANAGER",
+                  "policy_compliant": true
+                }
+        400:
+          body:
+            application/json:
+              example: |
+                {
+                  "error": "Bad Request",
+                  "message": "Missing required fields"
+                }

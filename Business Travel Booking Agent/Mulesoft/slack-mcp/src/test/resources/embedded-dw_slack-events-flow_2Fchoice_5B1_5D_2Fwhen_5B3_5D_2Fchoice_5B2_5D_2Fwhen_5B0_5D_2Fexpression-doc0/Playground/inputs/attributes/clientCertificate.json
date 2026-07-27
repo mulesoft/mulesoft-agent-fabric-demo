@@ -1,0 +1,73 @@
+{
+  "basicConstraints": 30,
+  "criticalExtensionOIDs": [
+    "Nunc",
+    "justo"
+  ],
+  "extendedKeyUsage": [
+    "a",
+    "nunc"
+  ],
+  "extensions": [
+    {
+      "criticality": true,
+      "oid": "a"
+    }
+  ],
+  "issuerAlternativeNames": [
+    {
+      "name": "Akilah",
+      "type": 35
+    }
+  ],
+  "issuerDN": {
+    "commonName": "mi",
+    "name": "Chung"
+  },
+  "issuerUniqueID": [
+    false,
+    true
+  ],
+  "issuerX500Principal": {
+    "name": "Charlie"
+  },
+  "keyUsage": [
+    false,
+    false,
+    false
+  ],
+  "name": "Alberta",
+  "nonCriticalExtensionOIDs": [
+    "molestie",
+    "elit"
+  ],
+  "notAfter": "2021-09-21",
+  "notBefore": "2022-03-27",
+  "publicKey": {
+    "algorithm": "consectetur",
+    "modulus": 60,
+    "params": 46,
+    "publicKey": "justo"
+  },
+  "serialNumber": 74,
+  "serialNumberObject": {
+    "serialNumber": 33
+  },
+  "sigAlgName": "adipiscing",
+  "sigAlgOID": "amet",
+  "subjectAlternativeNames": [
+    {
+      "name": "Adela",
+      "type": 10
+    }
+  ],
+  "subjectDN": {
+    "commonName": "dui",
+    "name": "Bryce"
+  },
+  "subjectX500Principal": {
+    "name": "Chas"
+  },
+  "type": "nibh",
+  "version": 78
+}

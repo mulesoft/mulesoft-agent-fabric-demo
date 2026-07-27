@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Salesforce.com, Inc. SPDX-License-Identifier: Apache-2.0 -->
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <!-- ── MCP Tool: Send Travel Request                    ── -->
+    <!-- ═══════════════════════════════════════════════════════ -->
+    <flow name="send-travel-request-flow" doc:name="Send Travel Request">
+        <mcp:tool-listener
+            doc:name="MCP Tool - Send Travel Request"
+            config-ref="MCP_Server_Config"
+            name="sendTravelRequest">
+            <mcp:description><![CDATA[Sends a travel request message to the AI travel agent broker and posts the response to a Slack channel.
+
+Use this tool to:
+1. Forward a user's travel request to the agent broker
+2. Receive the agent's response
+3. Post the response back to the specified Slack channel
+
+Input: userMessage (the travel request), slackChannel (Slack channel ID), slackUser (optional user ID)
+Output: Confirmation that the response was posted to Slack]]>
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "$schema": "# SECURITY: Remote schema removed (http://json-schema.org/draft-07/schema#)",
+  "title": "Send Travel Request",
+  "type": "object",
+  "properties": {
+    "userMessage": {
+      "type": "string",
+      "description": "The travel request message from the user"
+    },
+    "slackChannel": {
+      "type": "string",
+      "description": "The Slack channel ID to post the response to"
+    },
+    "slackUser": {
+      "type": "string",
+      "description": "The Slack user ID who initiated the request"
+    }
+  },
+  "required": ["userMessage", "slackChannel"]
+}]]>
+            </mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[payload]"/>
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <logger level="INFO" doc:name="Logger - Start"
+                message='#["sendTravelRequest tool called at " ++ now()]'/>
+
+        <!-- Extract parameters from MCP tool invocation -->
+        <set-variable
+            variableName="userMessage"
+            value="#[(payload.userMessage default payload.parameters.userMessage) default '']"
+            doc:name="Extract userMessage"/>
+        <set-variable
+            variableName="slackChannel"
+            value="#[(payload.slackChannel default payload.parameters.slackChannel) default '']"
+            doc:name="Extract slackChannel"/>
+        <set-variable
+            variableName="slackUser"
+            value="#[(payload.slackUser default payload.parameters.slackUser) default '']"
+            doc:name="Extract slackUser"/>
+
+        <!-- Post message directly to Slack (no broker callback — avoids circular loop) -->
+        <ee:transform doc:name="Build Slack Message Payload">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  channel: vars.slackChannel,
+  blocks: [
+    {
+      "type": "section",
+      text: {
+        "type": "mrkdwn",
+        text: ":airplane: *Travel Assistant:*\n" ++ (vars.userMessage default "Travel request is being processed!")
+      }
+    }
+  ]
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <http:request
+            doc:name="POST Slack chat.postMessage"
+            config-ref="slack-http-config"
+            method="POST"
+            path="/api/chat.postMessage">
+            <http:headers><![CDATA[#[{
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": "Bearer " ++ p('slack.botToken')
+            }]]]></http:headers>
+            <http:response-validator>
+                <http:success-status-code-validator values="200,201"/>
+            </http:response-validator>
+        </http:request>
+
+        <!-- Return MCP text response -->
+        <ee:transform doc:name="Build MCP Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var response = {
+  status: "SUCCESS",
+  tool: "sendTravelRequest",
+  message: "Travel options posted to Slack channel " ++ vars.slackChannel
+}
+---
+write(response, "application/json")]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Logger - Done" message="#[payload]"/>
+
+        <error-handler>
+            <on-error-propagate type="HTTP:BAD_REQUEST">
+                <ee:transform doc:name="400 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "sendTravelRequest",
+  error: "Bad Request",
+  message: "Request rejected — check input fields",
+  details: payload
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="HTTP:CONNECTIVITY">
+                <ee:transform doc:name="503 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "sendTravelRequest",
+  error: "Service Unavailable",
+  message: "Cannot connect to agent broker or Slack API"
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="ANY">
+                <ee:transform doc:name="500 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "sendTravelRequest",
+  error: "Internal Server Error",
+  message: "Unexpected error in sendTravelRequest tool",
+  details: error.description
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+</mule>

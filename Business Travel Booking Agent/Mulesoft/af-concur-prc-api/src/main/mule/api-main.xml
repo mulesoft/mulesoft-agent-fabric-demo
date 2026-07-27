@@ -1,0 +1,348 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Salesforce.com, Inc. SPDX-License-Identifier: Apache-2.0 -->
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit" xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core" xmlns:http="http://www.mulesoft.org/schema/mule/http" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd ">
+
+    <!-- Configuration Properties -->
+    <configuration-properties file="application-local.properties" doc:name="Configuration properties" />
+
+    <http:listener-config name="api-main-httpListenerConfig">
+        <http:listener-connection host="${http.host}" port="${http.port}" />
+    </http:listener-config>
+    <apikit:config name="api-main-config" api="api-main.raml" outboundHeadersMapName="outboundHeaders" httpStatusVarName="httpStatus" />
+    <http:request-config name="HTTP_Request_config" doc:name="HTTP Request config" doc:id="20d93146-3903-4a4d-8dea-4608a6e1f223">
+        <http:request-connection protocol="HTTPS" host="${concursys.host}" port="${concursys.port}" />
+    </http:request-config>
+    <flow name="api-main-main">
+        <http:listener config-ref="api-main-httpListenerConfig" path="/api/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:router config-ref="api-main-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:BAD_REQUEST">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  error: "Bad Request",
+  message: "Invalid or missing required fields",
+  details: error.description
+}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Method not allowed"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">405</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_ACCEPTABLE">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not acceptable"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">406</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Unsupported media type"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">415</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="APIKIT:NOT_IMPLEMENTED">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Not Implemented"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">501</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="api-main-console">
+        <http:listener config-ref="api-main-httpListenerConfig" path="/console/*">
+            <http:response statusCode="#[vars.httpStatus default 200]">
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:response>
+            <http:error-response statusCode="#[vars.httpStatus default 500]">
+                <http:body>#[payload]</http:body>
+                <http:headers>#[vars.outboundHeaders default {}]</http:headers>
+            </http:error-response>
+        </http:listener>
+        <apikit:console config-ref="api-main-config" />
+        <error-handler>
+            <on-error-propagate type="APIKIT:NOT_FOUND">
+                <ee:transform doc:name="Transform Message">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{message: "Resource not found"}]]></ee:set-payload>
+                    </ee:message>
+                    <ee:variables>
+                        <ee:set-variable variableName="httpStatus">404</ee:set-variable>
+                    </ee:variables>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+    <flow name="post:\process\book-flight:application\json:api-main-config">
+        <flow-ref doc:name="Flow Reference" doc:id="b92cb53f-661a-4e1c-bed7-0ab6fe0fdcec" name="Inpput-vallidation-sub_Flow"/>
+		<choice doc:name="Choice" doc:id="b0ca2984-7de1-497b-9112-3b98ac150abd" >
+			<when expression="#[vars.validInput.isValid == true]">
+				<flow-ref doc:name="Flow Reference" doc:id="81d84163-4f9b-4b2d-a577-fdf06d052f4a" name="bookFlight-sub_Flow"/>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Transform Message" doc:id="d82189f1-503e-47d7-9c7e-e8accb866fff">
+					<ee:message>
+						<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  error: "Bad Request",
+  message: "Missing required fields in request",
+  missing_fields: vars.validInput.missingFields,
+  expected_structure: {
+    tripDetails: {
+      traveler_id: "string",
+      origin: "string (IATA code e.g. ATL)",
+      destination: "string (IATA code e.g. LON)",
+      StartDate: "YYYY-MM-DD",
+      EndDate: "YYYY-MM-DD"
+    },
+    flights: {
+      price: "number",
+      airline: "string (IATA code e.g. B6)",
+      departure: "datetime (e.g. 2026-06-10T06:10:00)"
+    }
+  }
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<set-variable value="400" doc:name="Set Variable" doc:id="53bd3421-9309-431f-a841-b3fa90255f99" variableName="vars.validInput.isValid == true"/>
+			</otherwise>
+		</choice>
+    </flow>
+    <sub-flow name="bookFlight-sub_Flow" doc:id="d73898f8-1dd4-46a1-97b4-0c5bbec36d6c" >
+		<ee:transform doc:name="Transform Message" doc:id="83211aeb-24e3-48b6-9702-4d296502de6d">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<ee:transform doc:name="Transform Message" doc:id="4dac6603-19c2-4d2b-820f-449d06d53419">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+
+var AIRLINE_NAMES = {
+  "B6": "JetBlue",
+  "F9": "Frontier",
+  "AA": "American Airlines",
+  "DL": "Delta",
+  "UA": "United Airlines",
+  "WN": "Southwest",
+  "AS": "Alaska Airlines",
+  "NK": "Spirit"
+}
+---
+{
+  traveler_id: payload.traveler_id,
+  origin: payload.origin,
+  destination: payload.destination,
+  departure_date: payload.start_date,
+  airline: AIRLINE_NAMES[payload.flight_airline] default payload.flight_airline,
+  airline_code: payload.flight_airline,
+  flight_price: payload.flight_price as Number
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="cae289fb-2b20-4b84-afa6-eeaad46b3e03" />
+		<http:request doc:name="Request" doc:id="f80fef46-5c7c-4fa9-8508-14a2d6264c4a" method="POST" path="${concursys.path}" config-ref="HTTP_Request_config" />
+		<ee:transform doc:name="Transform Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+	</sub-flow>
+	<flow name="post:\process\submit-expense:application\json:api-main-config">
+		<flow-ref doc:name="Flow Reference" doc:id="6d8275c0-8a15-4d28-86cd-f733be20e69a" name="Inpput-vallidation-sub_Flow"/>
+		<choice doc:name="Choice" doc:id="2b2ce6a9-c7c9-458c-9f0d-4a79262f9ef0" >
+			<when expression="#[vars.validInput.isValid == true]">
+				<flow-ref doc:name="Flow Reference" doc:id="6fa7e413-c5a5-453e-bdf4-cfb904a368df" name="expense-sub_Flow"/>
+			</when>
+			<otherwise >
+				<ee:transform doc:name="Transform Message" doc:id="32b30d42-3d62-4b3f-b9b9-44b4a21fedee" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+  error: "Bad Request",
+  message: "Missing required fields in request",
+  missing_fields: vars.validInput.missingFields,
+  expected_structure: {
+    tripDetails: {
+      traveler_id: "string",
+      origin: "string (IATA code e.g. ATL)",
+      destination: "string (IATA code e.g. LON)",
+      StartDate: "YYYY-MM-DD",
+      EndDate: "YYYY-MM-DD"
+    },
+    flights: {
+      price: "number",
+      airline: "string (IATA code e.g. B6)",
+      departure: "datetime (e.g. 2026-06-10T06:10:00)"
+    }
+  }
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+				<set-variable value="400" doc:name="Set Variable" doc:id="98814c7d-b0bc-43ef-856e-579c500e1f7d" variableName="httpStatus"/>
+			</otherwise>
+		</choice>
+    </flow>
+	<sub-flow name="Inpput-vallidation-sub_Flow" doc:id="0773b923-1fd7-4f1a-bd64-c4bdf4018b26" >
+		<ee:transform doc:name="Transform Message" doc:id="bd652a93-8bd8-43d0-a885-b83c5d1c3637">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+			</ee:message>
+			<ee:variables>
+				<ee:set-variable variableName="validInput" ><![CDATA[%dw 2.0
+output application/json
+
+var missingFields = [
+  if (payload.traveler_id == null) "traveler_id" else null,
+  if (payload.origin == null) "origin" else null,
+  if (payload.destination == null) "destination" else null,
+  if (payload.start_date == null) "start_date" else null,
+  if (payload.end_date == null) "end_date" else null,
+  if (payload.flight_price == null) "flight_price" else null,
+  if (payload.flight_airline == null) "flight_airline" else null,
+  if (payload.flight_departure == null) "flight_departure" else null,
+  if (payload.hotel_name == null) "hotel_name" else null,
+  if (payload.hotel_address == null) "hotel_address" else null,
+  if (payload.hotel_price_per_night == null) "hotel_price_per_night" else null
+] filter ($ != null)
+---
+{
+  isValid: isEmpty(missingFields),
+  missingFields: missingFields
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</sub-flow>
+	<sub-flow name="expense-sub_Flow" doc:id="776bde29-9a92-4179-a110-737ea822a080" >
+		<ee:transform doc:name="Transform Message" doc:id="8b83c916-31f3-4075-bd2f-ead0a5ff268e">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<ee:transform doc:name="Transform Message" doc:id="fc7cc2dc-e34b-4795-8fa1-8c95d7a20fdd">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+
+var AIRLINE_NAMES = {
+  "B6": "JetBlue",
+  "F9": "Frontier",
+  "AA": "American Airlines",
+  "DL": "Delta",
+  "UA": "United Airlines",
+  "WN": "Southwest",
+  "AS": "Alaska Airlines",
+  "NK": "Spirit"
+}
+---
+{
+  FlightDetails: {
+    traveler_id: payload.traveler_id,
+    origin: payload.origin,
+    destination: payload.destination,
+    departure_date: payload.start_date,
+    airline: AIRLINE_NAMES[payload.flight_airline] default payload.flight_airline,
+    flight_price: payload.flight_price as Number
+  },
+  HotelDetails: {
+    traveler_id: payload.traveler_id,
+    Name: payload.hotel_name,
+    Location: payload.hotel_address,
+    Checkin_Date: payload.start_date,
+    Checkout_Date: payload.end_date,
+    hotel_price: payload.hotel_price_per_night as Number
+  }
+}]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+		<logger level="INFO" doc:name="Logger" doc:id="8a6ce2ed-abbc-4607-bfc5-ab4928063db3" />
+		<http:request doc:name="Request" doc:id="082270f8-fb3f-4c83-aa18-1f975f671ee5" method="POST" path="/api/concur/expense" config-ref="HTTP_Request_config" />
+		<ee:transform doc:name="Transform Message">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+	</sub-flow>
+</mule>

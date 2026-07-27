@@ -1,0 +1,34 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Java / Maven
+*.class
+*.jar
+*.war
+*.ear
+target/
+
+# Mule Studio / Anypoint Studio
+.mule/
+.tooling-project/
+.classpath
+.project
+.settings/
+velocity.log
+
+# Credentials / local config — never commit real values
+local.properties
+*.properties.enc
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+
+# IDE
+.vscode/
+.idea/
+*.iml

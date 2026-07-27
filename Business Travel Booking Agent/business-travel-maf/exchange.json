@@ -1,0 +1,106 @@
+{
+  "main": "agent-network.yaml",
+  "name": "business-travel-agent-fabric",
+  "classifier": "agent-network",
+  "organizationId": "<your-anypoint-org-id>",
+  "descriptorVersion": "1.0.0",
+  "tags": [
+    "business-travel",
+    "agent-fabric",
+    "demo"
+  ],
+  "metadata": {
+    "variables": {
+      "AzureOpenAI": {
+        "apiKey": {
+          "description": "Azure OpenAI API Key",
+          "default": "<your-azure-openai-api-key>",
+          "secret": true
+        },
+        "openaiurl": {
+          "description": "Azure OpenAI endpoint",
+          "default": "https://<your-resource>.openai.azure.com/openai/v1/",
+          "secret": false
+        },
+        "deploymentName": {
+          "description": "Azure OpenAI Deployment Name",
+          "default": "gpt-5",
+          "secret": false
+        }
+      },
+      "awsBedrock": {
+        "travelSearchUrl": {
+          "description": "Travel Search A2A Agent URL (AWS API Gateway + Lambda)",
+          "default": "https://<your-api-gateway-id>.execute-api.<region>.amazonaws.com",
+          "secret": false
+        }
+      },
+      "salesforce": {
+        "agentUrl": {
+          "description": "Agentforce Calendar Agent URL via Agent Fabric Egress Gateway",
+          "default": "https://<your-egress-gw>.<region>.cloudhub.io/<your-agentforce-path>",
+          "secret": false
+        },
+        "travelerId": {
+          "description": "Default Traveler Salesforce User ID",
+          "default": "<your-salesforce-user-id>",
+          "secret": false
+        }
+      },
+      "anypoint": {
+        "platform": {
+          "client_id": {
+            "description": "Anypoint runtime manager Client ID",
+            "default": "<your-anypoint-client-id>",
+            "secret": false
+          },
+          "client_secret": {
+            "description": "Anypoint runtime manager Client Secret",
+            "default": "<your-anypoint-client-secret>",
+            "secret": true
+          }
+        }
+      },
+      "mulesoft": {
+        "concurURL": {
+          "description": "MuleSoft Concur Book Flight URL",
+          "default": "https://<your-concur-mcp>.<region>.cloudhub.io",
+          "secret": false
+        },
+        "apiKey": {
+          "description": "MuleSoft API Key - not required for demo",
+          "default": "",
+          "secret": true
+        }
+      },
+      "slack": {
+        "messengerUrl": {
+          "description": "Slack MCP Server URL",
+          "default": "https://<your-slack-mcp>.<region>.cloudhub.io",
+          "secret": false
+        },
+        "channelId": {
+          "description": "Slack Notification Channel ID",
+          "default": "<your-slack-channel-id>",
+          "secret": false
+        },
+        "botToken": {
+          "description": "Slack Bot Token",
+          "default": "<your-slack-bot-token>",
+          "secret": true
+        }
+      },
+      "ingressgw": {
+        "url": {
+          "description": "Agent Network Ingress Gateway URL",
+          "default": "https://<your-ingress-gw>.<region>.cloudhub.io",
+          "secret": false
+        }
+      }
+    }
+  },
+  "dependencies": [],
+  "groupId": "<your-anypoint-org-id>",
+  "assetId": "business-travel-agent-fabric",
+  "version": "1.2.4"
+}

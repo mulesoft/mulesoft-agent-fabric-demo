@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Salesforce.com, Inc. SPDX-License-Identifier: Apache-2.0 -->
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:os="http://www.mulesoft.org/schema/mule/os"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+    <flow name="slack-events-flow" doc:name="Slack Events Listener">
+        <http:listener config-ref="MCP_HTTP_Listener_Config" path="/slack/events" doc:name="Slack Events"/>
+
+        <choice doc:name="Route by event type">
+
+            <!-- URL verification challenge from Slack -->
+            <when expression="#[payload.'type' == 'url_verification']">
+                <ee:transform doc:name="Return challenge">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ challenge: payload.challenge }]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </when>
+
+            <!-- Actual message event — not from a bot -->
+            <when expression="#[payload.'type' == 'event_callback' and payload.event.'type' == 'message' and !(payload.event.bot_id?)]">
+                <set-variable variableName="slackText"    value="#[(payload.event.text default '') as String]" doc:name="Save message text"/>
+                <set-variable variableName="slackChannel" value="#[payload.event.channel]"                    doc:name="Save channel"/>
+                <set-variable variableName="slackUser"    value="#[(payload.event.user default '') as String]" doc:name="Save user"/>
+
+                <!-- Always return 200 to Slack immediately -->
+                <ee:transform doc:name="Return 200 to Slack">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: "ok" }]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+
+                <choice doc:name="Is travel-related message?">
+                    <when expression="#[lower(vars.slackText) contains 'reset']">
+                        <os:remove key="#[vars.slackChannel]" objectStore="conversation-context-store" doc:name="Clear session context"/>
+                        <ee:transform doc:name="Build reset reply">
+                            <ee:message>
+                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ channel: vars.slackChannel, text: "Session cleared. Start a new travel request." }]]></ee:set-payload>
+                            </ee:message>
+                        </ee:transform>
+                        <http:request config-ref="slack-http-config" method="POST" path="/api/chat.postMessage" doc:name="Post reset confirmation">
+                            <http:headers><![CDATA[#[{ "Content-Type": "application/json; charset=utf-8", "Authorization": "Bearer " ++ p('slack.botToken') }]]]></http:headers>
+                        </http:request>
+                    </when>
+                    <when expression="#[(lower(vars.slackText) contains 'book') or&#10;(lower(vars.slackText) contains 'travel') or&#10;(lower(vars.slackText) contains 'trip') or&#10;(lower(vars.slackText) contains 'flight') or&#10;(lower(vars.slackText) contains 'hotel') or&#10;(lower(vars.slackText) contains 'approve') or&#10;(lower(vars.slackText) contains 'confirm') or&#10;(lower(vars.slackText) contains 'yes') or&#10;(lower(vars.slackText) contains 'proceed')]">
+                        <async doc:name="Process async so Slack 200 is already sent">
+                            <try doc:name="Try">
+
+                            <!-- Check Object Store for existing conversation context -->
+                            <os:retrieve
+                                key="#[vars.slackChannel]"
+                                objectStore="conversation-context-store"
+                                doc:name="Get conversation context"
+                                target="conversationContext">
+                                <os:default-value><![CDATA[#[{ contextId: null, taskId: null }]]]></os:default-value>
+                            </os:retrieve>
+
+                            <!-- Build AgentFabric A2A request — include contextId/taskId if continuing a conversation -->
+                            <ee:transform doc:name="Build AgentFabric request">
+                                <ee:message>
+                                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+
+var existingContext = vars.conversationContext
+var hasContext = existingContext.contextId != null
+---
+{
+    jsonrpc: "2.0",
+    id: uuid(),
+    method: "message/send",
+    params: {
+        message: {
+            kind: "message",
+            messageId: uuid(),
+            role: "user",
+            parts: [{ kind: "text", text: vars.slackText }]
+        } ++ (if (hasContext) {
+            contextId: existingContext.contextId,
+            taskId: existingContext.taskId
+        } else {})
+    }
+}]]></ee:set-payload>
+                                </ee:message>
+                            </ee:transform>
+
+                            <!-- Call AgentFabric synchronously -->
+                            <http:request
+                                config-ref="agent-broker-http-config"
+                                method="POST"
+                                path="/travel-orchestrator/"
+                                doc:name="Call AgentFabric">
+                                <http:headers><![CDATA[#[{"Content-Type": "application/json"}]]]></http:headers>
+                            </http:request>
+
+                            <!-- Store contextId + taskId for next turn -->
+                            <os:store
+                                key="#[vars.slackChannel]"
+                                objectStore="conversation-context-store"
+                                doc:name="Save conversation context">
+                                <os:value><![CDATA[#[{
+                                    contextId: payload.result.contextId,
+                                    taskId: payload.result.id
+                                }]]]></os:value>
+                            </os:store>
+
+                            <!-- Extract response text from AgentFabric artifact -->
+                            <ee:transform doc:name="Extract response text">
+                                <ee:variables>
+                                    <ee:set-variable variableName="agentResponse"><![CDATA[%dw 2.0
+output application/java
+---
+((payload.result.artifacts[0].parts[0].text) default "I'm processing your request. Please wait...") as String]]></ee:set-variable>
+                                </ee:variables>
+                            </ee:transform>
+
+                            <!-- Post agent response back to Slack -->
+                            <ee:transform doc:name="Build Slack reply">
+                                <ee:message>
+                                    <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: vars.slackChannel,
+    blocks: [
+        {
+            "type": "section",
+            text: {
+                "type": "mrkdwn",
+                text: ":robot_face: *Travel Assistant:*\n" ++ vars.agentResponse
+            }
+        }
+    ]
+}]]></ee:set-payload>
+                                </ee:message>
+                            </ee:transform>
+
+                            <http:request
+                                config-ref="slack-http-config"
+                                method="POST"
+                                path="/api/chat.postMessage"
+                                doc:name="Post reply to Slack">
+                                <http:headers><![CDATA[#[{
+                                    "Content-Type": "application/json; charset=utf-8",
+                                    "Authorization": "Bearer " ++ p('slack.botToken')
+                                }]]]></http:headers>
+                            </http:request>
+
+                            <logger level="INFO" doc:name="Logger - Reply sent" message="#['Reply posted to Slack channel: ' ++ vars.slackChannel]"/>
+
+                                <error-handler>
+                                    <on-error-continue type="ANY" doc:name="Log async errors">
+                                        <logger level="ERROR" doc:name="Log error"
+                                            message="#['Error in async Slack handler: ' ++ error.description]"/>
+                                        <ee:transform doc:name="Build error message">
+                                            <ee:message>
+                                                <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+    channel: vars.slackChannel,
+    text: ":warning: Sorry, I encountered an error processing your request. Please try again."
+}]]></ee:set-payload>
+                                            </ee:message>
+                                        </ee:transform>
+                                        <http:request
+                                            config-ref="slack-http-config"
+                                            method="POST"
+                                            path="/api/chat.postMessage"
+                                            doc:name="Post error to Slack">
+                                            <http:headers><![CDATA[#[{
+                                                "Content-Type": "application/json; charset=utf-8",
+                                                "Authorization": "Bearer " ++ p('slack.botToken')
+                                            }]]]></http:headers>
+                                        </http:request>
+                                    </on-error-continue>
+                                </error-handler>
+
+                            </try>
+                        </async>
+                    </when>
+                    <otherwise>
+                        <logger level="DEBUG" message="#['Slack message ignored: ' ++ vars.slackText]" doc:name="Ignore non-travel"/>
+                    </otherwise>
+                </choice>
+            </when>
+
+            <otherwise>
+                <ee:transform doc:name="Ignore other events">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{ status: "ignored" }]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </otherwise>
+        </choice>
+    </flow>
+
+</mule>

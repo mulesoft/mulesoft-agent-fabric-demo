@@ -1,0 +1,336 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright 2026 Salesforce.com, Inc. SPDX-License-Identifier: Apache-2.0 -->
+<mule xmlns:http="http://www.mulesoft.org/schema/mule/http" 
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:mcp="http://www.mulesoft.org/schema/mule/mcp"
+      xmlns="http://www.mulesoft.org/schema/mule/core" 
+      xmlns:doc="http://www.mulesoft.org/schema/mule/documentation" 
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+      xsi:schemaLocation="http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/mcp http://www.mulesoft.org/schema/mule/mcp/current/mule-mcp.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd">
+
+    <configuration-properties file="config.properties" doc:name="Configuration properties"/>
+
+    <!-- ── HTTP Listener Config ── -->
+    <http:listener-config name="HTTP_Listener_config" doc:name="HTTP Listener config">
+        <http:listener-connection host="0.0.0.0" port="8081" />
+    </http:listener-config>
+
+    <!-- ── MCP Server Config ── -->
+    <mcp:server-config name="MCP_Server" 
+                       doc:name="MCP Server"
+                       serverName="jkm-booking-expense-agent" 
+                       serverVersion="1.0.0">
+        <mcp:streamable-http-server-connection 
+            listenerConfig="HTTP_Listener_config" 
+            responseContentType="JSON" />
+    </mcp:server-config>
+
+    <!-- ── Process API Connection ── -->
+    <http:request-config name="Process_API_Config" 
+                         doc:name="Process API Config"
+                         basePath="/api">
+        <http:request-connection protocol="HTTPS"
+                                  host="${concur.processApiHost}"
+                                  port="443" />
+    </http:request-config>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- ── MCP Tool 1: Book Flight              ── -->
+    <!-- ═══════════════════════════════════════════ -->
+    <flow name="BookFlight-mcpFlow">
+        <mcp:tool-listener doc:name="MCP Tool - Book Flight"
+                           config-ref="MCP_Server" 
+                           name="book-flight">
+            <mcp:description><![CDATA[Books a business flight in Concur after user confirmation.
+
+Use this tool AFTER:
+1. AWS Travel Planner Agent has returned flight and hotel options
+2. Salesforce Calendar Agent confirmed no conflicts
+3. User confirmed they want to proceed
+
+Do NOT use this tool before calendar check is complete.
+
+Input: Selected flight details, hotel details, and trip details
+Output: Booking reference, confirmation number, ticket number, seat and class]]>
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Book Flight Request",
+  "type": "object",
+  "properties": {
+    "flight_id": {"type": "string"},
+    "flight_price": {"type": "number"},
+    "flight_airline": {"type": "string"},
+    "flight_departure": {"type": "string"},
+    "flight_arrival": {"type": "string"},
+    "hotel_name": {"type": "string"},
+    "hotel_address": {"type": "string"},
+    "hotel_price_per_night": {"type": "number"},
+    "traveler_id": {"type": "string"},
+    "origin": {"type": "string"},
+    "destination": {"type": "string"},
+    "start_date": {"type": "string"},
+     "end_date": {"type": "string"}
+  },
+  "required": ["flight_price", "flight_airline", "flight_departure", "hotel_name", "hotel_address",
+  "hotel_price_per_night", "traveler_id", "origin", "destination", "start_date", "end_date"]
+}]]>
+            </mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[payload]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <logger level="INFO" doc:name="Logger - Start"
+                message='#["book-flight tool called at " ++ now()]'/>
+
+        <!-- Save original payload -->
+        <ee:transform doc:name="Save Original Payload">
+            <ee:variables>
+                <ee:set-variable variableName="originalPayload"><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Call Process API - Book Flight -->
+        <http:request doc:name="Call Process API - Book Flight"
+                      method="POST"
+                      path="/process/book-flight"
+                      config-ref="Process_API_Config">
+            <http:body><![CDATA[#[vars.originalPayload]]]></http:body>
+            <http:response-validator>
+                <http:success-status-code-validator values="200,201"/>
+            </http:response-validator>
+        </http:request>
+
+        <!-- Format response -->
+        <ee:transform doc:name="Build Flight Booking Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var response = {
+  status: "FLIGHT_BOOKED",
+  agent: "jkm-booking-expense-agent",
+  tool: "book-flight",
+  booking_reference: payload.booking_reference,
+  confirmation_number: payload.confirmation_number,
+  ticket_number: payload.ticket_number,
+  airline: payload.airline,
+  seat: payload.seat,
+  class: payload.class,
+  departure: payload.departure,
+  arrival: payload.arrival,
+  amount_charged: payload.amount_charged,
+  next_step: "Block calendar then call submit-expense tool"
+}
+---
+write(response, "application/json")]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Logger - Flight Booked" message="#[payload]"/>
+
+        <error-handler>
+            <on-error-propagate type="HTTP:BAD_REQUEST">
+				<ee:transform doc:name="Transform Message" doc:id="8d5cb7b0-87e7-430b-9c1f-9fd416c1db0e" >
+					<ee:message >
+						<ee:set-payload ><![CDATA[%dw 2.0
+output application/json
+---
+{
+  status: "FAILED",
+  tool: "book-flight",
+  error: "Bad Request",
+  message: "Process API rejected flight booking — check input fields",
+  details: payload
+}]]></ee:set-payload>
+					</ee:message>
+				</ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="HTTP:CONNECTIVITY">
+                <ee:transform doc:name="503 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  status: "FAILED",
+  tool: "book-flight",
+  error: "Service Unavailable",
+  message: "Cannot connect to Process API"
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="ANY">
+                <ee:transform doc:name="500 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+  status: "FAILED",
+  tool: "book-flight",
+  error: "Internal Server Error",
+  message: "Unexpected error in book-flight tool",
+  details: error.description
+}]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- ── MCP Tool 2: Submit Expense           ── -->
+    <!-- ═══════════════════════════════════════════ -->
+    <flow name="SubmitExpense-mcpFlow">
+        <mcp:tool-listener doc:name="MCP Tool - Submit Expense"
+                           config-ref="MCP_Server" 
+                           name="submit-expense">
+            <mcp:description><![CDATA[Submits an expense report in Concur after flight is booked and calendar is blocked.
+
+Use this tool AFTER:
+1. book-flight tool has successfully returned a booking reference
+2. Salesforce Calendar Agent has blocked the travel dates
+
+Do NOT call this before flight is booked and calendar is blocked.
+
+Input: Same flight, hotel and trip details plus booking reference from book-flight tool
+Output: Expense report ID, total amount, and approval status]]>
+            </mcp:description>
+            <mcp:parameters-schema><![CDATA[{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Submit Expense Request",
+  "type": "object",
+  "properties": {
+    "flight_id": {"type": "string"},
+    "flight_price": {"type": "number"},
+    "flight_airline": {"type": "string"},
+    "flight_departure": {"type": "string"},
+    "flight_arrival": {"type": "string"},
+    "hotel_name": {"type": "string"},
+    "hotel_address": {"type": "string"},
+    "hotel_price_per_night": {"type": "number"},
+    "traveler_id": {"type": "string"},
+    "origin": {"type": "string"},
+    "destination": {"type": "string"},
+    "start_date": {"type": "string"},
+    "end_date": {"type": "string"},
+    "booking_reference": {"type": "string"}
+  },
+  "required": ["flight_price", "flight_airline", "flight_departure", "hotel_name", "hotel_address",
+  "hotel_price_per_night", "traveler_id", "origin", "destination", "start_date", "end_date", "booking_reference"]
+}]]>
+            </mcp:parameters-schema>
+            <mcp:responses>
+                <mcp:text-tool-response-content text="#[payload]" />
+            </mcp:responses>
+        </mcp:tool-listener>
+
+        <logger level="INFO" doc:name="Logger - Start"
+                message='#["submit-expense tool called at " ++ now()]'/>
+
+        <!-- Save original payload -->
+        <ee:transform doc:name="Save Original Payload">
+            <ee:variables>
+                <ee:set-variable variableName="originalPayload"><![CDATA[%dw 2.0
+output application/json
+---
+payload]]></ee:set-variable>
+            </ee:variables>
+        </ee:transform>
+
+        <!-- Call Process API - Submit Expense -->
+        <http:request doc:name="Call Process API - Submit Expense"
+                      method="POST"
+                      path="/process/submit-expense"
+                      config-ref="Process_API_Config">
+            <http:body><![CDATA[#[vars.originalPayload]]]></http:body>
+            <http:response-validator>
+                <http:success-status-code-validator values="200,201"/>
+            </http:response-validator>
+        </http:request>
+
+        <!-- Format response -->
+        <ee:transform doc:name="Build Expense Response">
+            <ee:message>
+                <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+var response = {
+  status: "EXPENSE_SUBMITTED",
+  agent: "jkm-booking-expense-agent",
+  tool: "submit-expense",
+  expense_report_id: payload.expense_report_id,
+  report_name: payload.report_name,
+  line_items: payload.line_items,
+  total_amount: payload.total_amount,
+  currency: payload.currency,
+  approval_status: payload.approval_status,
+  submitted_date: payload.submitted_date,
+  policy_compliant: payload.policy_compliant,
+  next_step: "Send notification to traveler"
+}
+---
+write(response, "application/json")]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <logger level="INFO" doc:name="Logger - Expense Submitted" message="#[payload]"/>
+
+        <error-handler>
+            <on-error-propagate type="HTTP:BAD_REQUEST">
+                <ee:transform doc:name="400 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "submit-expense",
+  error: "Bad Request",
+  message: "Process API rejected expense submission — check input fields",
+  details: payload
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="HTTP:CONNECTIVITY">
+                <ee:transform doc:name="503 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "submit-expense",
+  error: "Service Unavailable",
+  message: "Cannot connect to Process API"
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+            <on-error-propagate type="ANY">
+                <ee:transform doc:name="500 Error">
+                    <ee:message>
+                        <ee:set-payload><![CDATA[%dw 2.0
+output text/plain
+---
+write({
+  status: "FAILED",
+  tool: "submit-expense",
+  error: "Internal Server Error",
+  message: "Unexpected error in submit-expense tool",
+  details: error.description
+}, "application/json")]]></ee:set-payload>
+                    </ee:message>
+                </ee:transform>
+            </on-error-propagate>
+        </error-handler>
+    </flow>
+</mule>
