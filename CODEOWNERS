@@ -1,5 +1,3 @@
-# Code Owners — these users are automatically requested for review on PRs
-# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
-
-# GUSINFO: kjosyula@gus.com
-* @kavya-Josyula
+#ECCN:Open Source
+#GUSINFO:MS Success Architect (demo)
+* @kjosyula @mulesoft/AgentFabric
